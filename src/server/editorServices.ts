@@ -1,3 +1,5 @@
+// eslint-disable-next-line local/no-direct-import
+import { getPnpApiPath } from "../compiler/pnpapi.js";
 import {
     addToSeen,
     arrayFrom,
@@ -1417,6 +1419,7 @@ export class ProjectService {
     readonly session: Session<unknown> | undefined;
 
     private performanceEventHandler?: PerformanceEventHandler;
+    private pnpWatcher?: FileWatcher;
 
     private pendingPluginEnablements?: Map<Project, Promise<BeginEnablePluginResult>[]>;
     private currentPluginEnablementPromise?: Promise<void>;
@@ -1505,6 +1508,8 @@ export class ProjectService {
                 getDetailWatchInfo,
             );
         this.canUseWatchEvents = getCanUseWatchEvents(this, opts.canUseWatchEvents);
+
+        this.pnpWatcher = this.watchPnpFile();
         opts.incrementalVerifier?.(this);
     }
 
@@ -4002,6 +4007,9 @@ export class ProjectService {
                 this.hostConfiguration.watchOptions = substitution;
                 this.hostConfiguration.beforeSubstitution = substitution === watchOptions ? undefined : watchOptions;
                 this.logger.info(`Host watch options changed to ${JSON.stringify(this.hostConfiguration.watchOptions)}, it will be take effect for next watches.`);
+
+                this.pnpWatcher?.close();
+                this.watchPnpFile();
             }
         }
     }
@@ -5629,6 +5637,30 @@ export class ProjectService {
                             : undefined;
                 }
             },
+        );
+    }
+
+    private watchPnpFile() {
+        const pnpApiPath = getPnpApiPath(__filename);
+        if (!pnpApiPath) {
+            return;
+        }
+
+        return this.watchFactory.watchFile(
+            pnpApiPath,
+            () => {
+                this.forEachProject(project => {
+                    for (const info of project.getScriptInfos()) {
+                        project.resolutionCache.invalidateResolutionOfFile(info.path);
+                    }
+                    project.markAsDirty();
+                    updateProjectIfDirty(project);
+                });
+                this.delayEnsureProjectForOpenFiles();
+            },
+            PollingInterval.Low,
+            this.hostConfiguration.watchOptions,
+            WatchType.ConfigFile,
         );
     }
 
