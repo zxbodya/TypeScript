@@ -3284,6 +3284,7 @@ declare namespace ts {
             private packageJsonFilesMap;
             private incompleteCompletionsCache;
             private performanceEventHandler?;
+            private pnpWatcher?;
             private pendingPluginEnablements?;
             private currentPluginEnablementPromise?;
             readonly jsDocParsingMode: JSDocParsingMode | undefined;
@@ -3409,6 +3410,7 @@ declare namespace ts {
             private enableRequestedPluginsAsync;
             private enableRequestedPluginsWorker;
             configurePlugin(args: protocol.ConfigurePluginRequestArguments): void;
+            private watchPnpFile;
             private watchPackageJsonFile;
             private onPackageJsonChange;
         }
@@ -9477,6 +9479,8 @@ declare namespace ts {
          *  - Updating the program
          */
         Full = 2,
+        /** Reload the resolutions */
+        Resolutions = 3,
     }
     function findConfigFile(searchPath: string, fileExists: (fileName: string) => boolean, configName?: string): string | undefined;
     function resolveTripleslashReference(moduleName: string, containingFile: string): string;

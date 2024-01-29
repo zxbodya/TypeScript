@@ -95,6 +95,7 @@ import {
     WatchTypeRegistry,
     WildcardDirectoryWatcher,
 } from "./_namespaces/ts.js";
+import { getPnpApiPath } from "./pnpapi.js";
 
 export interface ReadBuildProgramHost {
     useCaseSensitiveFileNames(): boolean;
@@ -490,6 +491,12 @@ export function createWatchProgram<T extends BuilderProgram>(host: WatchCompiler
         configFileWatcher = watchFile(configFileName, scheduleProgramReload, PollingInterval.High, watchOptions, WatchType.ConfigFile);
     }
 
+    let pnpFileWatcher: FileWatcher | undefined;
+    const pnpApiPath = getPnpApiPath(__filename);
+    if (pnpApiPath) {
+        pnpFileWatcher = watchFile(pnpApiPath, scheduleResolutionReload, PollingInterval.High, watchOptions, WatchType.ConfigFile);
+    }
+
     const compilerHost = createCompilerHostFromProgramHost(host, () => compilerOptions!, directoryStructureHost) as CompilerHost & ResolutionCacheHost;
     setGetSourceFileAsHashVersioned(compilerHost);
     // Members for CompilerHost
@@ -572,6 +579,10 @@ export function createWatchProgram<T extends BuilderProgram>(host: WatchCompiler
             configFileWatcher.close();
             configFileWatcher = undefined;
         }
+        if (pnpFileWatcher) {
+            pnpFileWatcher.close();
+            pnpFileWatcher = undefined;
+        }
         extendedConfigCache?.clear();
         extendedConfigCache = undefined;
         if (sharedExtendedConfigFileWatchers) {
@@ -610,7 +621,7 @@ export function createWatchProgram<T extends BuilderProgram>(host: WatchCompiler
         return builderProgram && builderProgram.getProgramOrUndefined();
     }
 
-    function synchronizeProgram() {
+    function synchronizeProgram(forceAllFilesAsInvalidated = false) {
         writeLog(`Synchronizing program`);
 
         Debug.assert(compilerOptions);
@@ -626,7 +637,7 @@ export function createWatchProgram<T extends BuilderProgram>(host: WatchCompiler
             }
         }
 
-        const { hasInvalidatedResolutions, hasInvalidatedLibResolutions } = resolutionCache.createHasInvalidatedResolutions(customHasInvalidatedResolutions, customHasInvalidLibResolutions);
+        const { hasInvalidatedResolutions, hasInvalidatedLibResolutions } = resolutionCache.createHasInvalidatedResolutions(forceAllFilesAsInvalidated ? returnTrue : customHasInvalidatedResolutions, customHasInvalidLibResolutions);
         const {
             originalReadFile,
             originalFileExists,
@@ -896,6 +907,13 @@ export function createWatchProgram<T extends BuilderProgram>(host: WatchCompiler
         scheduleProgramUpdate();
     }
 
+    function scheduleResolutionReload() {
+        writeLog("Clearing resolutions");
+        resolutionCache.clear();
+        updateLevel = ProgramUpdateLevel.Resolutions;
+        scheduleProgramUpdate();
+    }
+
     function updateProgramWithWatchStatus() {
         timerToUpdateProgram = undefined;
         reportFileChangeDetectedOnCreateProgram = true;
@@ -909,6 +927,9 @@ export function createWatchProgram<T extends BuilderProgram>(host: WatchCompiler
                 break;
             case ProgramUpdateLevel.Full:
                 reloadConfigFile();
+                break;
+            case ProgramUpdateLevel.Resolutions:
+                synchronizeProgram(/*forceAllFilesAsInvalidated*/ true);
                 break;
             default:
                 synchronizeProgram();
