@@ -1,3 +1,7 @@
+// eslint-disable-next-line local/no-direct-import
+import { isImportablePathPnp } from "../compiler/pnp.js";
+// eslint-disable-next-line local/no-direct-import
+import { getPnpApi } from "../compiler/pnpapi.js";
 import {
     __String,
     addToSeen,
@@ -440,6 +444,10 @@ function isImportablePath(
     globalCachePath: string | undefined,
     host: ModuleSpecifierResolutionHost,
 ): boolean {
+    if (getPnpApi(fromPath)) {
+        return isImportablePathPnp(fromPath, toPath);
+    }
+
     // If it's in a `node_modules` but is not reachable from here via a global import, don't bother.
     const toNodeModules = forEachAncestorDirectoryStoppingAtGlobalCache(
         host,
