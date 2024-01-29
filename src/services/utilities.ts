@@ -1,3 +1,5 @@
+// eslint-disable-next-line local/no-direct-import
+import { getPnpApi } from "../compiler/pnpapi.js";
 import {
     __String,
     addEmitFlags,
@@ -3863,9 +3865,18 @@ export function createPackageJsonImportFilter(fromFile: SourceFile | FutureSourc
     }
 
     function getNodeModulesPackageNameFromFileName(importedFileName: string, moduleSpecifierResolutionHost: ModuleSpecifierResolutionHost): string | undefined {
-        if (!importedFileName.includes("node_modules")) {
+        const pnpapi = getPnpApi(importedFileName);
+        if (pnpapi) {
+            const fromLocator = pnpapi.findPackageLocator(fromFile.fileName);
+            const toLocator = pnpapi.findPackageLocator(importedFileName);
+            if (!(fromLocator && toLocator)) {
+                return undefined;
+            }
+        }
+        else if (!importedFileName.includes("node_modules")) {
             return undefined;
         }
+
         const specifier = moduleSpecifiers.getNodeModulesPackageName(
             host.getCompilationSettings(),
             fromFile,
