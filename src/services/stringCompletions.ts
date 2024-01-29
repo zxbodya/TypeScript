@@ -1,3 +1,7 @@
+// eslint-disable-next-line local/no-direct-import
+import { getPnpTypeRoots } from "../compiler/pnp.js";
+// eslint-disable-next-line local/no-direct-import
+import { getPnpApi } from "../compiler/pnpapi.js";
 import {
     CompletionKind,
     createCompletionDetails,
@@ -1062,7 +1066,52 @@ function getCompletionEntriesForNonRelativeModules(
                     return nodeModulesDirectoryOrImportsLookup(ancestor);
                 };
             }
-            forEachAncestorDirectoryStoppingAtGlobalCache(host, scriptPath, ancestorLookup);
+
+            const pnpApi = getPnpApi(scriptPath);
+
+            if (pnpApi) {
+                // Splits a require request into its components, or return null if the request is a file path
+                // eslint-disable-next-line regexp/no-super-linear-backtracking, regexp/no-empty-alternative, regexp/no-dupe-disjunctions, regexp/use-ignore-case
+                const pathRegExp = /^(?![a-zA-Z]:[\\/]|\\\\|\.{0,2}(?:\/|$))((?:@[^/]+\/)?[^/]+)\/*(.*|)$/;
+                const dependencyNameMatch = fragment.match(pathRegExp);
+                if (dependencyNameMatch) {
+                    const [, dependencyName, subPath] = dependencyNameMatch;
+                    if (startsWith(dependencyName, "#")) {
+                        forEachAncestorDirectoryStoppingAtGlobalCache(host, scriptPath, ancestorLookup);
+                    }
+                    else {
+                        let unqualified;
+                        try {
+                            unqualified = pnpApi.resolveToUnqualified(dependencyName, scriptPath, { considerBuiltins: false });
+                        }
+                        catch {
+                            // It's fine if the resolution fails
+                        }
+                        if (unqualified) {
+                            const packageDirectory = normalizePath(unqualified);
+                            let shouldGetCompletions = true;
+
+                            if (fragmentDirectory && resolvePackageJsonExports) {
+                                const packageFile = combinePaths(packageDirectory, "package.json");
+
+                                if (tryFileExists(host, packageFile)) {
+                                    const packageJson = readJson(packageFile, host);
+
+                                    exportsOrImportsLookup((packageJson as MapLike<unknown>).exports, subPath, packageDirectory, /*isExports*/ true, /*isImports*/ false);
+                                    shouldGetCompletions = false;
+                                }
+                            }
+
+                            if (shouldGetCompletions) {
+                                getCompletionEntriesForDirectoryFragment(subPath, packageDirectory, extensionOptions, program, host, moduleSpecifierResolutionHost, /*moduleSpecifierIsRelative*/ false, /*exclude*/ undefined, result);
+                            }
+                        }
+                    }
+                }
+            }
+            else {
+                forEachAncestorDirectoryStoppingAtGlobalCache(host, scriptPath, ancestorLookup);
+            }
         }
     }
 
@@ -1317,10 +1366,17 @@ function getCompletionEntriesFromTypings(program: Program, host: LanguageService
         getCompletionEntriesFromDirectories(root);
     }
 
-    // Also get all @types typings installed in visible node_modules directories
-    for (const packageJson of findPackageJsons(scriptPath, host)) {
-        const typesDir = combinePaths(getDirectoryPath(packageJson), "node_modules/@types");
-        getCompletionEntriesFromDirectories(typesDir);
+    if (getPnpApi(scriptPath)) {
+        for (const root of getPnpTypeRoots(scriptPath)) {
+            getCompletionEntriesFromDirectories(root);
+        }
+    }
+    else {
+        // Also get all @types typings installed in visible node_modules directories
+        for (const packageJson of findPackageJsons(scriptPath, host)) {
+            const typesDir = combinePaths(getDirectoryPath(packageJson), "node_modules/@types");
+            getCompletionEntriesFromDirectories(typesDir);
+        }
     }
 
     return result;
