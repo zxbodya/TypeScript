@@ -1115,7 +1115,8 @@ function tryGetModuleNameAsNodeModule({ path, isRedirect }: ModulePath, { getCan
 
         if (fromLocator && toLocator) {
             const fromInfo = pnpApi.getPackageInformation(fromLocator);
-            if (toLocator.reference === fromInfo.packageDependencies.get(toLocator.name)) {
+            const fromInfoName = fromInfo.packageDependencies.get(toLocator.name);
+            if ((toLocator.reference === fromInfoName) || (fromInfoName && fromInfoName.startsWith('virtual:') && fromInfoName.includes(toLocator.reference))) {
                 pnpPackageName = toLocator.name;
             }
             else {
