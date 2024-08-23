@@ -138,8 +138,7 @@ jobs:
           git diff --staged --exit-code
 
   coverage:
-    if: ${{ github.event_name != 'merge_group' }}
-
+    if: github.repository == 'microsoft/TypeScript'
     runs-on:
       - 'self-hosted'
       - '1ES.Pool=TypeScript-1ES-GitHub-Large'
