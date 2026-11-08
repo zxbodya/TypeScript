@@ -108,6 +108,7 @@ export * from "./unittests/tsbuildWatch/libraryResolution.js";
 export * from "./unittests/tsbuildWatch/moduleResolution.js";
 export * from "./unittests/tsbuildWatch/noEmit.js";
 export * from "./unittests/tsbuildWatch/noEmitOnError.js";
+export * from "./unittests/tsbuildWatch/pnp.js";
 export * from "./unittests/tsbuildWatch/programUpdates.js";
 export * from "./unittests/tsbuildWatch/projectsBuilding.js";
 export * from "./unittests/tsbuildWatch/publicApi.js";
