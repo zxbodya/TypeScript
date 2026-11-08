@@ -130,6 +130,7 @@ import {
     WriteFileCallback,
 } from "./_namespaces/ts.js";
 import * as performance from "./_namespaces/ts.performance.js";
+import { getPnpApiPath } from "./pnpapi.js";
 
 const minimumDate = new Date(-8640000000000000);
 
@@ -1056,16 +1057,17 @@ function createBuildOrUpdateInvalidedProject<T extends BuilderProgram>(
         );
         if (state.watch) {
             const internalMap = state.moduleResolutionCache?.getPackageJsonInfoCache().getInternalMap();
-            state.lastCachedPackageJsonLookups.set(
-                projectPath,
-                internalMap && new Set(arrayFrom(
-                    internalMap.values(),
-                    data =>
-                        state.host.realpath && (isPackageJsonInfo(data) || data.directoryExists) ?
-                            state.host.realpath(combinePaths(data.packageDirectory, "package.json")) :
-                            combinePaths(data.packageDirectory, "package.json"),
-                )),
-            );
+            let packageJsonLookups = internalMap && new Set(arrayFrom(
+                internalMap.values(),
+                data =>
+                    state.host.realpath && (isPackageJsonInfo(data) || data.directoryExists) ?
+                        state.host.realpath(combinePaths(data.packageDirectory, "package.json")) :
+                        combinePaths(data.packageDirectory, "package.json"),
+            ));
+            // With PnP, dependencies are located by the PnP runtime rather than through package.json lookups
+            const pnpApiPath = getPnpApiPath(getDirectoryPath(config.options.configFilePath!));
+            if (pnpApiPath) (packageJsonLookups ??= new Set()).add(pnpApiPath);
+            state.lastCachedPackageJsonLookups.set(projectPath, packageJsonLookups);
             state.builderPrograms.set(projectPath, program);
         }
         step++;
