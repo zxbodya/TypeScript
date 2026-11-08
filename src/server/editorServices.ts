@@ -5650,9 +5650,7 @@ export class ProjectService {
             pnpApiPath,
             () => {
                 this.forEachProject(project => {
-                    for (const info of project.getScriptInfos()) {
-                        project.resolutionCache.invalidateResolutionOfFile(info.path);
-                    }
+                    project.resolutionCache.onChangesAffectModuleResolution();
                     project.markAsDirty();
                     updateProjectIfDirty(project);
                 });
