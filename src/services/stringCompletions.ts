@@ -1126,8 +1126,7 @@ function getCompletionEntriesForNonRelativeModules(
                                 if (tryFileExists(host, packageFile)) {
                                     const packageJson = readJson(packageFile, host);
 
-                                    exportsOrImportsLookup((packageJson as MapLike<unknown>).exports, subPath, packageDirectory, /*isExports*/ true, /*isImports*/ false);
-                                    shouldGetCompletions = false;
+                                    shouldGetCompletions = !exportsOrImportsLookup((packageJson as MapLike<unknown>).exports, subPath, packageDirectory, /*isExports*/ true, /*isImports*/ false);
                                 }
                             }
 

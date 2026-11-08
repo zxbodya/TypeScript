@@ -367,6 +367,11 @@ describe("unittests:: pnp:: language service", () => {
         return completions?.entries ?? [];
     }
 
+    it("completes subpaths of dependencies", () => {
+        const names = getCompletionNames(`import {} from "foo/";`).map(e => e.name);
+        assert.includeMembers(names, ["index", "sub"]);
+    });
+
     it("completes exports of dependencies", () => {
         const names = getCompletionNames(`import {} from "exp/";`).map(e => e.name);
         assert.deepEqual(names, ["feature"]);
