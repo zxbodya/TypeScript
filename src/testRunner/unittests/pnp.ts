@@ -102,7 +102,7 @@ describe("unittests:: pnp:: pnpapi", () => {
         try {
             assert.strictEqual(getPnpApi(pnpPaths.app), api);
             assert.strictEqual(getPnpApiPath(pnpPaths.app), `${pnpProjectRoot}/.pnp.cjs`);
-            assert.isNull(getPnpApi("/home/src/projects/other"));
+            assert.isUndefined(getPnpApi("/home/src/projects/other"));
         }
         finally {
             uninstall();
@@ -167,6 +167,11 @@ describe("unittests:: pnp:: isImportablePathPnp", () => {
 
     it("disallows importing from paths outside of the PnP project", () => {
         assert.isFalse(isImportablePathPnp(pnpPaths.appIndex, "/home/src/projects/other/index.ts"));
+    });
+
+    it("disallows importing from files that aren't part of any package", () => {
+        // The PnP API of the running TypeScript also covers paths outside of the project, which have no package
+        assert.isFalse(isImportablePathPnp("/outside/index.ts", pnpPaths.fooIndex));
     });
 });
 

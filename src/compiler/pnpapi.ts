@@ -56,18 +56,18 @@ interface ModuleWithPnp {
 
 /* eslint-enable no-restricted-syntax */
 
-export function getPnpApi(path: string): PnpApi | null | undefined { // eslint-disable-line no-restricted-syntax
+export function getPnpApi(path: string): PnpApi | undefined {
     if (typeof process.versions.pnp === "undefined") {
         return;
     }
 
     const { findPnpApi }: ModuleWithPnp = require("module");
     if (findPnpApi) {
-        return findPnpApi(`${path}/`);
+        return findPnpApi(`${path}/`) ?? undefined;
     }
 }
 
-export function getPnpApiPath(path: string): string | null | undefined { // eslint-disable-line no-restricted-syntax
+export function getPnpApiPath(path: string): string | undefined {
     // eslint-disable-next-line no-restricted-syntax
-    return getPnpApi(path)?.resolveRequest("pnpapi", /*issuer*/ null);
+    return getPnpApi(path)?.resolveRequest("pnpapi", /*issuer*/ null) ?? undefined;
 }

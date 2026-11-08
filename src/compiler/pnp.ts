@@ -42,11 +42,11 @@ export function isImportablePathPnp(fromPath: string, toPath: string): boolean {
     const toLocator = pnpApi.findPackageLocator(toPath);
 
     // eslint-disable-next-line no-restricted-syntax
-    if (toLocator === null) {
+    if (fromLocator === null || toLocator === null) {
         return false;
     }
 
-    const fromInfo = pnpApi.getPackageInformation(fromLocator!);
+    const fromInfo = pnpApi.getPackageInformation(fromLocator);
     const toReference = fromInfo.packageDependencies.get(toLocator.name);
 
     if (toReference) {

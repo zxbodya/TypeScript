@@ -3063,9 +3063,12 @@ export class ConfiguredProject extends Project {
                         return path;
                     }
                     const targetLocator = pnpApi.findPackageLocator(`${path}/`);
-                    const { packageLocation } = pnpApi.getPackageInformation(targetLocator!);
-                    const request = combinePaths(targetLocator!.name, getRelativePathFromDirectory(packageLocation, path, /*ignoreCase*/ false));
-                    return pnpApi.resolveToUnqualified(request, `${basePath}/`)!;
+                    if (!targetLocator) {
+                        return path;
+                    }
+                    const { packageLocation } = pnpApi.getPackageInformation(targetLocator);
+                    const request = combinePaths(targetLocator.name, getRelativePathFromDirectory(packageLocation, path, /*ignoreCase*/ false));
+                    return pnpApi.resolveToUnqualified(request, `${basePath}/`) ?? path;
                 }
                 catch {
                     // something went wrong with the resolution, try not to fail
