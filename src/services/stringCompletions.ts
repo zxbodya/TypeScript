@@ -1108,8 +1108,7 @@ function getCompletionEntriesForNonRelativeModules(
                                 if (tryFileExists(host, packageFile)) {
                                     const packageJson = readJson(packageFile, host);
 
-                                    exportsOrImportsLookup((packageJson as MapLike<unknown>).exports, subPath, packageDirectory, /*isExports*/ true, /*isImports*/ false);
-                                    shouldGetCompletions = false;
+                                    shouldGetCompletions = !exportsOrImportsLookup((packageJson as MapLike<unknown>).exports, subPath, packageDirectory, /*isExports*/ true, /*isImports*/ false);
                                 }
                             }
 
@@ -1128,9 +1127,10 @@ function getCompletionEntriesForNonRelativeModules(
 
     return arrayFrom(result.values());
 
-    function exportsOrImportsLookup(lookupTable: unknown, fragment: string, baseDirectory: string, isExports: boolean, isImports: boolean) {
+    /** Returns true if the search should stop */
+    function exportsOrImportsLookup(lookupTable: unknown, fragment: string, baseDirectory: string, isExports: boolean, isImports: boolean): boolean {
         if (typeof lookupTable !== "object" || lookupTable === null) { // eslint-disable-line no-restricted-syntax
-            return; // null lookupTable or entrypoint only
+            return lookupTable !== undefined; // null lookupTable or entrypoint only
         }
         const keys = getOwnKeys(lookupTable as MapLike<unknown>);
         const conditions = getConditions(compilerOptions, mode);
@@ -1154,6 +1154,7 @@ function getCompletionEntriesForNonRelativeModules(
             },
             comparePatternKeys,
         );
+        return true;
     }
 }
 
