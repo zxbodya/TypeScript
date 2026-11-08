@@ -82,6 +82,20 @@ describe("unittests:: pnp:: pnpapi", () => {
         }
     });
 
+    it("is disabled when the runtime doesn't provide findPnpApi", () => {
+        const uninstall = installFakePnpApi(createFakePnpApi());
+        const module: { findPnpApi?: unknown; } = require("module");
+        delete module.findPnpApi;
+        try {
+            assert.isDefined(process.versions.pnp);
+            assert.isUndefined(getPnpApi(pnpPaths.app));
+            assert.isUndefined(getPnpApiPath(pnpPaths.app));
+        }
+        finally {
+            uninstall();
+        }
+    });
+
     it("finds the PnP API and the path of the PnP runtime", () => {
         const api = createFakePnpApi();
         const uninstall = installFakePnpApi(api);
@@ -287,7 +301,7 @@ describe("unittests:: pnp:: module specifiers", () => {
 
     function getModuleSpecifiers(importedFile: string, importingFile = pnpPaths.appIndex) {
         const host = createHost();
-        const { lsHost, service } = createLanguageService(host, [pnpPaths.appIndex, pnpPaths.appUtil, pnpPaths.libThing, pnpPaths.quxTypes, pnpPaths.typesEnvIndex]);
+        const { lsHost, service } = createLanguageService(host, [pnpPaths.appIndex, pnpPaths.appUtil, pnpPaths.libThing, pnpPaths.libSubIndex, pnpPaths.libSubDeep, pnpPaths.quxTypes, pnpPaths.typesEnvIndex]);
         const program = service.getProgram()!;
         const checker = program.getTypeChecker();
         const importing = program.getSourceFile(importingFile)!;
@@ -306,6 +320,11 @@ describe("unittests:: pnp:: module specifiers", () => {
     it("uses the package name for workspace dependencies", () => {
         assert.deepEqual(getModuleSpecifiers(pnpPaths.libIndex), ["lib"]);
         assert.deepEqual(getModuleSpecifiers(pnpPaths.libThing), ["lib/thing"]);
+    });
+
+    it("uses the package name for files in subdirectories of dependencies", () => {
+        assert.deepEqual(getModuleSpecifiers(pnpPaths.libSubDeep), ["lib/sub/deep"]);
+        assert.deepEqual(getModuleSpecifiers(pnpPaths.libSubIndex), ["lib/sub"]);
     });
 
     it("uses the package name for package dependencies", () => {
@@ -363,5 +382,49 @@ describe("unittests:: pnp:: language service", () => {
         assert.deepEqual(sources("fooValue"), ["foo"]);
         assert.deepEqual(sources("libValue"), ["lib"]);
         assert.notInclude(sources("bazValue"), "baz");
+    });
+});
+
+describe("unittests:: pnp:: auto-import filtering", () => {
+    let api: FakePnpApi;
+    useFakePnpApi(() => api = createFakePnpApi());
+
+    function createFilter(extraFiles: ts.MapLike<string> = {}) {
+        const host = createHost();
+        for (const [path, content] of Object.entries(extraFiles)) host.writeFile(path, content);
+        const { lsHost, service } = createLanguageService(host, [pnpPaths.appIndex, ...Object.keys(extraFiles)]);
+        const program = service.getProgram()!;
+        const fromFile = program.getSourceFile(pnpPaths.appIndex)!;
+        const moduleSpecifierResolutionHost = ts.createModuleSpecifierResolutionHost(program, lsHost);
+        const packageJsonFilter = ts.createPackageJsonImportFilter(fromFile, {}, lsHost);
+        return {
+            getSourceFileInfo: (fileName: string) => packageJsonFilter.getSourceFileInfo(program.getSourceFile(fileName)!, moduleSpecifierResolutionHost),
+            isImportable: (fileName: string) => {
+                const toFile = program.getSourceFile(fileName)!;
+                return ts.isImportable(program, fromFile, toFile, toFile.symbol, {}, packageJsonFilter, moduleSpecifierResolutionHost, /*moduleSpecifierCache*/ undefined);
+            },
+        };
+    }
+
+    it("allows dependencies listed in package.json", () => {
+        const { getSourceFileInfo, isImportable } = createFilter();
+        assert.deepEqual(getSourceFileInfo(pnpPaths.libIndex), { importable: true, packageName: "lib" });
+        assert.deepEqual(getSourceFileInfo(pnpPaths.fooIndex), { importable: true, packageName: "foo" });
+        assert.isTrue(isImportable(pnpPaths.libIndex));
+        assert.isTrue(isImportable(pnpPaths.fooIndex));
+    });
+
+    it("rejects packages that aren't dependencies", () => {
+        const { getSourceFileInfo, isImportable } = createFilter();
+        assert.deepEqual(getSourceFileInfo(pnpPaths.bazIndex), { importable: false, packageName: "baz" });
+        assert.isFalse(isImportable(pnpPaths.bazIndex));
+    });
+
+    it("rejects files of the PnP project that aren't in any package", () => {
+        api.setPackages(getPnpMonorepoPackages().filter(pkg => pkg.name !== "project"));
+        const tool = `${pnpProjectRoot}/scripts/tool.ts`;
+        const { getSourceFileInfo, isImportable } = createFilter({ [tool]: "export const tool = 1;\n" });
+        assert.deepEqual(getSourceFileInfo(tool), { importable: true, packageName: undefined });
+        assert.isFalse(isImportable(tool));
     });
 });
