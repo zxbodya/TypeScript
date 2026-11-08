@@ -1,33 +1,29 @@
+import {
+    PnpApi,
+    PnpDependencyTarget,
+    PnpPackageInformation,
+    PnpPackageLocator,
+    PnpTopLevelLocator,
+} from "../../../compiler/pnpapi.js";
 import * as ts from "../../_namespaces/ts.js";
-
-/** Either a reference, an alias (`[name, reference]`), or `null` for an unfulfilled peer dependency. */
-export type PnpReferencish = string | [string, string] | null; // eslint-disable-line no-restricted-syntax
 
 export interface PnpPackage {
     name: string;
     reference: string;
     /** Absolute path of the package directory, without trailing slash. */
     location: string;
-    dependencies?: Record<string, PnpReferencish>;
-}
-
-export interface PnpLocator {
-    name: string;
-    reference: string;
-}
-
-export interface PnpPackageInformation {
-    packageLocation: string;
-    packageDependencies: Map<string, PnpReferencish>;
+    dependencies?: Record<string, PnpDependencyTarget>;
 }
 
 /**
  * Minimal in-memory implementation of the subset of the Yarn PnP API
  * (https://yarnpkg.com/advanced/pnpapi) that TypeScript relies on.
  */
-export class FakePnpApi {
-    private readonly locators = new Map<string, PnpLocator>();
-    private readonly infos = new Map<PnpLocator, PnpPackageInformation>();
+export class FakePnpApi implements PnpApi {
+    readonly VERSIONS = { std: 3 };
+    readonly topLevel: PnpTopLevelLocator = { name: null, reference: null }; // eslint-disable-line no-restricted-syntax
+    private readonly locators = new Map<string, PnpPackageLocator>();
+    private readonly infos = new Map<PnpPackageLocator, PnpPackageInformation>();
 
     constructor(
         /** Directory containing the `.pnp.cjs` file; only paths under it are part of the PnP project. */
@@ -47,11 +43,13 @@ export class FakePnpApi {
         this.infos.clear();
         for (const pkg of packages) {
             // The real API hands out the same locator object for a given package, which TypeScript relies on
-            const locator: PnpLocator = { name: pkg.name, reference: pkg.reference };
+            const locator: PnpPackageLocator = { name: pkg.name, reference: pkg.reference };
             this.locators.set(locatorKey(pkg.name, pkg.reference), locator);
             this.infos.set(locator, {
                 packageLocation: ts.ensureTrailingDirectorySeparator(pkg.location),
                 packageDependencies: new Map(Object.entries(pkg.dependencies ?? {})),
+                packagePeers: new Set(),
+                linkType: "HARD",
             });
         }
     }
@@ -60,9 +58,17 @@ export class FakePnpApi {
         return ts.startsWith(ts.normalizeSlashes(path), ts.ensureTrailingDirectorySeparator(this.projectRoot));
     }
 
-    findPackageLocator(path: string): PnpLocator | null { // eslint-disable-line no-restricted-syntax
+    getDependencyTreeRoots(): PnpPackageLocator[] {
+        return this.getAllLocators().filter(locator => ts.startsWith(locator.reference, "workspace:"));
+    }
+
+    getAllLocators(): PnpPackageLocator[] {
+        return ts.arrayFrom(this.infos.keys());
+    }
+
+    findPackageLocator(path: string): PnpPackageLocator | null { // eslint-disable-line no-restricted-syntax
         path = ts.normalizeSlashes(path);
-        let best: PnpLocator | undefined;
+        let best: PnpPackageLocator | undefined;
         let bestLength = -1;
         this.infos.forEach((info, locator) => {
             const location = info.packageLocation;
@@ -74,21 +80,24 @@ export class FakePnpApi {
         return best ?? null; // eslint-disable-line no-restricted-syntax
     }
 
-    getLocator(name: string, referencish: string | [string, string]): PnpLocator {
+    getLocator(name: string, referencish: string | [name: string, reference: string]): PnpPackageLocator {
         return ts.isArray(referencish)
             ? { name: referencish[0], reference: referencish[1] }
             : { name, reference: referencish };
     }
 
-    getPackageInformation(locator: PnpLocator): PnpPackageInformation {
-        const info = this.infos.get(this.locators.get(locatorKey(locator.name, locator.reference))!);
+    getPackageInformation(locator: PnpPackageLocator | PnpTopLevelLocator): PnpPackageInformation {
+        const info = locator.name !== null && this.infos.get(this.locators.get(locatorKey(locator.name, locator.reference))!); // eslint-disable-line no-restricted-syntax
         if (!info) {
             throw new Error(`Unknown locator ${locator.name}@${locator.reference}`);
         }
         return info;
     }
 
-    resolveToUnqualified(request: string, issuer: string, _opts?: { considerBuiltins?: boolean; }): string {
+    resolveToUnqualified(request: string, issuer: string | null, _opts?: { considerBuiltins?: boolean; }): string { // eslint-disable-line no-restricted-syntax
+        if (issuer === null) { // eslint-disable-line no-restricted-syntax
+            throw new Error("FakePnpApi.resolveToUnqualified: requests without issuer aren't supported");
+        }
         const { packageName, rest } = ts.parsePackageName(request);
         const issuerLocator = this.findPackageLocator(issuer);
         if (!issuerLocator) {
@@ -100,6 +109,10 @@ export class FakePnpApi {
         }
         const { packageLocation } = this.getPackageInformation(this.getLocator(packageName, referencish));
         return ts.removeTrailingDirectorySeparator(ts.combinePaths(packageLocation, rest));
+    }
+
+    resolveUnqualified(unqualified: string): string {
+        throw new Error(`FakePnpApi.resolveUnqualified: unsupported request ${unqualified}`);
     }
 
     resolveRequest(request: string, issuer: string | null): string | null { // eslint-disable-line no-restricted-syntax
@@ -115,7 +128,7 @@ function locatorKey(name: string, reference: string) {
 }
 
 interface ModuleWithPnp {
-    findPnpApi?: (path: string) => unknown;
+    findPnpApi?: (lookupSource: URL | string) => PnpApi | null; // eslint-disable-line no-restricted-syntax
 }
 
 /**
@@ -135,7 +148,10 @@ export function installFakePnpApi(api: FakePnpApi): () => void {
     const originalPnpVersion = (process.versions as Record<string, string | undefined>).pnp;
 
     (process.versions as Record<string, string | undefined>).pnp = "3";
-    module.findPnpApi = path => api.isInProject(path) || !ts.startsWith(ts.normalizeSlashes(path), "/home/src/") ? api : null; // eslint-disable-line no-restricted-syntax
+    module.findPnpApi = lookupSource => {
+        const path = typeof lookupSource === "string" ? lookupSource : lookupSource.pathname;
+        return api.isInProject(path) || !ts.startsWith(ts.normalizeSlashes(path), "/home/src/") ? api : null; // eslint-disable-line no-restricted-syntax
+    };
 
     return () => {
         module.findPnpApi = originalFindPnpApi;
