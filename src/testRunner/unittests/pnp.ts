@@ -247,7 +247,8 @@ describe("unittests:: pnp:: module resolution", () => {
 });
 
 describe("unittests:: pnp:: module resolution cache", () => {
-    useFakePnpApi(createFakePnpApi);
+    let api: FakePnpApi;
+    useFakePnpApi(() => api = createFakePnpApi());
 
     function createResolver() {
         const host = createHost();
@@ -262,35 +263,52 @@ describe("unittests:: pnp:: module resolution cache", () => {
             trace: s => traces.push(s),
         };
         const resolutionOptions: ts.CompilerOptions = { ...options, traceResolution: true };
-        const cache = ts.createModuleResolutionCache(pnpPaths.app, ts.createGetCanonicalFileName(host.useCaseSensitiveFileNames), resolutionOptions);
+        const getCanonicalFileName = ts.createGetCanonicalFileName(host.useCaseSensitiveFileNames);
+        const cache = ts.createModuleResolutionCache(pnpPaths.app, getCanonicalFileName, resolutionOptions);
+        const typeReferenceCache = ts.createTypeReferenceDirectiveResolutionCache(pnpPaths.app, getCanonicalFileName, resolutionOptions);
         return {
             resolve(moduleName: string, containingFile: string) {
-                traces.length = 0;
-                const resolved = ts.resolveModuleName(moduleName, containingFile, resolutionOptions, resolutionHost, cache, /*redirectedReference*/ undefined, ts.ModuleKind.ESNext).resolvedModule?.resolvedFileName;
-                return { resolved, fromCache: traces.some(t => t.includes("was found in cache from location")) };
+                return ts.resolveModuleName(moduleName, containingFile, resolutionOptions, resolutionHost, cache, /*redirectedReference*/ undefined, ts.ModuleKind.ESNext).resolvedModule?.resolvedFileName;
+            },
+            resolveTypeReference(name: string, containingFile: string) {
+                return ts.resolveTypeReferenceDirective(name, containingFile, resolutionOptions, resolutionHost, /*redirectedReference*/ undefined, typeReferenceCache).resolvedTypeReferenceDirective?.resolvedFileName;
             },
         };
     }
 
-    it("reuses resolutions from ancestor directories within the same package", () => {
+    // The resolution cache shares results with ancestor directories, which only holds for node_modules lookups:
+    // with PnP, an ancestor directory can belong to another package with different dependencies.
+
+    it("does not share resolutions with sibling packages", () => {
         const { resolve } = createResolver();
-        assert.deepEqual(resolve("foo", `${pnpPaths.app}/src/nested/file.ts`), { resolved: pnpPaths.fooIndex, fromCache: false });
-        assert.deepEqual(resolve("foo", pnpPaths.appIndex), { resolved: pnpPaths.fooIndex, fromCache: true });
+        assert.strictEqual(resolve("foo", pnpPaths.appIndex), pnpPaths.fooIndex);
+        assert.isUndefined(resolve("foo", pnpPaths.libIndex));
     });
 
-    it("does not reuse resolutions in sibling packages", () => {
+    it("does not share resolutions with ancestor packages that don't have the dependency", () => {
         const { resolve } = createResolver();
-        assert.deepEqual(resolve("foo", pnpPaths.appIndex), { resolved: pnpPaths.fooIndex, fromCache: false });
-        assert.deepEqual(resolve("foo", pnpPaths.libIndex), { resolved: undefined, fromCache: false });
+        assert.strictEqual(resolve("foo", pnpPaths.appIndex), pnpPaths.fooIndex);
+        assert.isUndefined(resolve("foo", `${pnpProjectRoot}/index.ts`));
     });
 
-    it("reuses resolutions in ancestor packages that don't have the dependency", () => {
+    it("does not share failed resolutions with ancestor packages that have the dependency", () => {
+        api.setPackages(getPnpMonorepoPackages().map(pkg => pkg.name === "project" ? { ...pkg, dependencies: { ...pkg.dependencies, baz: "npm:1.0.0" } } : pkg));
         const { resolve } = createResolver();
-        assert.deepEqual(resolve("foo", pnpPaths.appIndex), { resolved: pnpPaths.fooIndex, fromCache: false });
-        // Current behavior, likely a bug: the cache shares a resolution with ancestor directories up to the common
-        // prefix with the resolved file, which only holds for node_modules lookups. The root workspace doesn't
-        // depend on `foo`, and resolves it only because `app` did first.
-        assert.deepEqual(resolve("foo", `${pnpProjectRoot}/index.ts`), { resolved: pnpPaths.fooIndex, fromCache: true });
+        assert.isUndefined(resolve("baz", pnpPaths.appIndex));
+        assert.strictEqual(resolve("baz", `${pnpProjectRoot}/index.ts`), pnpPaths.bazIndex);
+    });
+
+    it("does not share type reference resolutions with ancestor packages that don't have the dependency", () => {
+        const { resolveTypeReference } = createResolver();
+        assert.strictEqual(resolveTypeReference("foo", pnpPaths.appIndex), pnpPaths.fooIndex);
+        assert.isUndefined(resolveTypeReference("foo", `${pnpProjectRoot}/index.ts`));
+    });
+
+    it("resolves consistently from nested directories of the same package", () => {
+        const { resolve } = createResolver();
+        assert.strictEqual(resolve("foo", `${pnpPaths.app}/src/nested/file.ts`), pnpPaths.fooIndex);
+        assert.strictEqual(resolve("foo", pnpPaths.appIndex), pnpPaths.fooIndex);
+        assert.strictEqual(resolve("foo", `${pnpPaths.app}/index.ts`), pnpPaths.fooIndex);
     });
 });
 

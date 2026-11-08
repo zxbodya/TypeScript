@@ -555,7 +555,8 @@ export function resolveTypeReferenceDirective(typeReferenceDirectiveName: string
 
     const containingDirectory = containingFile ? getDirectoryPath(containingFile) : undefined;
     let result = containingDirectory ? cache?.getFromDirectoryCache(typeReferenceDirectiveName, resolutionMode, containingDirectory, redirectedReference) : undefined;
-    if (!result && containingDirectory && !isExternalModuleNameRelative(typeReferenceDirectiveName)) {
+    // With PnP, resolutions can't be shared with ancestor directories, which can belong to other packages
+    if (!result && containingDirectory && !isExternalModuleNameRelative(typeReferenceDirectiveName) && !getPnpApi(containingDirectory)) {
         result = cache?.getFromNonRelativeNameCache(typeReferenceDirectiveName, resolutionMode, containingDirectory, redirectedReference);
     }
 
@@ -3045,10 +3046,8 @@ function loadModuleFromNearestNodeModulesDirectoryWorker(extensions: Extensions,
     function lookup(extensions: Extensions) {
         const issuer = normalizeSlashes(directory);
         if (getPnpApi(issuer)) {
-            const resolutionFromCache = tryFindNonRelativeModuleNameInCache(cache, moduleName, mode, issuer, redirectedReference, state);
-            if (resolutionFromCache) {
-                return resolutionFromCache;
-            }
+            // The non-relative name cache shares resolutions with ancestor directories, which doesn't hold with PnP:
+            // an ancestor directory can belong to another package, with different dependencies.
             return toSearchResult(loadModuleFromImmediateNodeModulesDirectoryPnP(extensions, moduleName, issuer, state, typesScopeOnly, cache, redirectedReference));
         }
 
