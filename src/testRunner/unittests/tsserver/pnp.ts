@@ -63,4 +63,52 @@ describe("unittests:: tsserver:: pnp::", () => {
 
         assert.deepEqual(getProject(session, pnpPaths.appIndex).getProjectReferences()?.map(ref => ref.path), [otherProject]);
     });
+
+    it("keeps project references to workspaces that aren't dependencies", () => {
+        api.setPackages(
+            getPnpMonorepoPackages().map(pkg => {
+                if (pkg.name !== "app") return pkg;
+                const { lib: _, ...dependencies } = pkg.dependencies!;
+                return { ...pkg, dependencies };
+            }),
+        );
+        const host = TestServerHost.createServerHost({
+            ...getPnpMonorepoFiles(),
+            [`${pnpPaths.app}/tsconfig.json`]: JSON.stringify({
+                compilerOptions: { module: "esnext", moduleResolution: "bundler", noEmit: true },
+                references: [{ path: "../lib" }],
+            }),
+            [`${pnpPaths.lib}/tsconfig.json`]: JSON.stringify({ compilerOptions: { composite: true } }),
+        });
+        const session = new TestSession(host);
+        openFilesForSession([pnpPaths.appIndex], session);
+
+        assert.deepEqual(getProject(session, pnpPaths.appIndex).getProjectReferences()?.map(ref => ref.path), [pnpPaths.lib]);
+    });
+
+    it("watches the PnP runtime again when host watch options change", () => {
+        const host = TestServerHost.createServerHost(getPnpMonorepoFiles());
+        const session = new TestSession(host);
+        openFilesForSession([pnpPaths.appIndex], session);
+        const getPnpWatcherCount = () => {
+            let count = 0;
+            host.watchUtils.pollingWatches.forEach(api.pnpApiPath, () => count++);
+            host.watchUtils.fsWatches.forEach(api.pnpApiPath, () => count++);
+            return count;
+        };
+        const setWatchFile = (watchFile: ts.server.protocol.WatchFileKind) =>
+            session.executeCommandSeq<ts.server.protocol.ConfigureRequest>({
+                command: ts.server.protocol.CommandTypes.Configure,
+                arguments: { watchOptions: { watchFile } },
+            });
+        assert.strictEqual(getPnpWatcherCount(), 1);
+
+        setWatchFile(ts.server.protocol.WatchFileKind.UseFsEvents);
+        assert.strictEqual(getPnpWatcherCount(), 1);
+
+        // Current behavior, likely a bug: the new watcher isn't stored in `pnpWatcher`,
+        // so later changes close the already closed initial watcher and watchers accumulate.
+        setWatchFile(ts.server.protocol.WatchFileKind.PriorityPollingInterval);
+        assert.strictEqual(getPnpWatcherCount(), 2);
+    });
 });

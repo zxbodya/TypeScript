@@ -113,6 +113,16 @@ describe("unittests:: pnp:: getPnpTypeRoots", () => {
         assert.deepEqual(getPnpTypeRoots("/home/src/projects/other"), []);
     });
 
+    it("returns nothing for paths of the PnP project that aren't in any package", () => {
+        const uninstall = installFakePnpApi(new FakePnpApi(pnpProjectRoot, getPnpMonorepoPackages().filter(pkg => pkg.name !== "project")));
+        try {
+            assert.deepEqual(getPnpTypeRoots(`${pnpProjectRoot}/scripts`), []);
+        }
+        finally {
+            uninstall();
+        }
+    });
+
     it("is used alongside node_modules/@types to compute the default type roots", () => {
         const expected = [...getNodeModulesTypeRoots(pnpPaths.app), pnpPaths.typesEnvRoot];
         assert.deepEqual(ts.getEffectiveTypeRoots({}, { getCurrentDirectory: () => pnpPaths.app }), expected);
@@ -217,6 +227,54 @@ describe("unittests:: pnp:: module resolution", () => {
     });
 });
 
+describe("unittests:: pnp:: module resolution cache", () => {
+    useFakePnpApi(createFakePnpApi);
+
+    function createResolver() {
+        const host = createHost();
+        const traces: string[] = [];
+        const resolutionHost: ts.ModuleResolutionHost = {
+            fileExists: path => host.fileExists(path),
+            readFile: path => host.readFile(path),
+            directoryExists: path => host.directoryExists(path),
+            realpath: path => host.realpath(path),
+            getCurrentDirectory: () => pnpPaths.app,
+            useCaseSensitiveFileNames: host.useCaseSensitiveFileNames,
+            trace: s => traces.push(s),
+        };
+        const resolutionOptions: ts.CompilerOptions = { ...options, traceResolution: true };
+        const cache = ts.createModuleResolutionCache(pnpPaths.app, ts.createGetCanonicalFileName(host.useCaseSensitiveFileNames), resolutionOptions);
+        return {
+            resolve(moduleName: string, containingFile: string) {
+                traces.length = 0;
+                const resolved = ts.resolveModuleName(moduleName, containingFile, resolutionOptions, resolutionHost, cache, /*redirectedReference*/ undefined, ts.ModuleKind.ESNext).resolvedModule?.resolvedFileName;
+                return { resolved, fromCache: traces.some(t => t.includes("was found in cache from location")) };
+            },
+        };
+    }
+
+    it("reuses resolutions from ancestor directories within the same package", () => {
+        const { resolve } = createResolver();
+        assert.deepEqual(resolve("foo", `${pnpPaths.app}/src/nested/file.ts`), { resolved: pnpPaths.fooIndex, fromCache: false });
+        assert.deepEqual(resolve("foo", pnpPaths.appIndex), { resolved: pnpPaths.fooIndex, fromCache: true });
+    });
+
+    it("does not reuse resolutions in sibling packages", () => {
+        const { resolve } = createResolver();
+        assert.deepEqual(resolve("foo", pnpPaths.appIndex), { resolved: pnpPaths.fooIndex, fromCache: false });
+        assert.deepEqual(resolve("foo", pnpPaths.libIndex), { resolved: undefined, fromCache: false });
+    });
+
+    it("reuses resolutions in ancestor packages that don't have the dependency", () => {
+        const { resolve } = createResolver();
+        assert.deepEqual(resolve("foo", pnpPaths.appIndex), { resolved: pnpPaths.fooIndex, fromCache: false });
+        // Current behavior, likely a bug: the cache shares a resolution with ancestor directories up to the common
+        // prefix with the resolved file, which only holds for node_modules lookups. The root workspace doesn't
+        // depend on `foo`, and resolves it only because `app` did first.
+        assert.deepEqual(resolve("foo", `${pnpProjectRoot}/index.ts`), { resolved: pnpPaths.fooIndex, fromCache: true });
+    });
+});
+
 describe("unittests:: pnp:: module resolution without PnP", () => {
     it("does not resolve PnP dependencies", () => {
         assert.isUndefined(resolve(createHost(), "foo"));
@@ -227,12 +285,12 @@ describe("unittests:: pnp:: module resolution without PnP", () => {
 describe("unittests:: pnp:: module specifiers", () => {
     useFakePnpApi(createFakePnpApi);
 
-    function getModuleSpecifiers(importedFile: string) {
+    function getModuleSpecifiers(importedFile: string, importingFile = pnpPaths.appIndex) {
         const host = createHost();
         const { lsHost, service } = createLanguageService(host, [pnpPaths.appIndex, pnpPaths.appUtil, pnpPaths.libThing, pnpPaths.quxTypes, pnpPaths.typesEnvIndex]);
         const program = service.getProgram()!;
         const checker = program.getTypeChecker();
-        const importing = program.getSourceFile(pnpPaths.appIndex)!;
+        const importing = program.getSourceFile(importingFile)!;
         const imported = program.getSourceFile(importedFile)!;
         assert.isDefined(imported, `${importedFile} should be part of the program`);
         return ts.moduleSpecifiers.getModuleSpecifiers(
@@ -264,6 +322,12 @@ describe("unittests:: pnp:: module specifiers", () => {
 
     it("uses relative paths within the same package", () => {
         assert.deepEqual(getModuleSpecifiers(pnpPaths.appUtil), ["./util"]);
+    });
+
+    it("uses absolute paths for workspaces that aren't dependencies", () => {
+        // Current behavior, likely a bug: with no dependency to take the package name from,
+        // `topLevelPackageNameIndex` is undefined and the whole path ends up being used as the specifier.
+        assert.deepEqual(getModuleSpecifiers(pnpPaths.appUtil, pnpPaths.libIndex), [ts.removeFileExtension(pnpPaths.appUtil)]);
     });
 });
 
