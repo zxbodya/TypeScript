@@ -1,7 +1,9 @@
 // eslint-disable-next-line local/no-direct-import
 import { getPnpTypeRoots } from "../compiler/pnp.js";
-// eslint-disable-next-line local/no-direct-import
-import { getPnpApi } from "../compiler/pnpapi.js";
+import {
+    getPnpApi,
+    resolvePnpRequestToUnqualified,
+} from "../compiler/pnpapi.js"; // eslint-disable-line local/no-direct-import
 import {
     CompletionKind,
     createCompletionDetails,
@@ -1111,7 +1113,7 @@ function getCompletionEntriesForNonRelativeModules(
                     else {
                         let unqualified;
                         try {
-                            unqualified = pnpApi.resolveToUnqualified(dependencyName, scriptPath, { considerBuiltins: false });
+                            unqualified = resolvePnpRequestToUnqualified(pnpApi, dependencyName, scriptPath);
                         }
                         catch {
                             // It's fine if the resolution fails

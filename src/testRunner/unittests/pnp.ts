@@ -11,8 +11,11 @@ import {
     FakePnpApi,
     getPnpMonorepoFiles,
     getPnpMonorepoPackages,
+    getPnpMonorepoPackagesWithPeerDependencies,
+    getPnpPeerDependencyFiles,
     installFakePnpApi,
     pnpPaths,
+    pnpPeerDependencyPaths,
     pnpProjectRoot,
     useFakePnpApi,
 } from "./helpers/pnp.js";
@@ -243,6 +246,99 @@ describe("unittests:: pnp:: module resolution", () => {
         assert.isDefined(program.getSourceFile(pnpPaths.libIndex));
         assert.isDefined(program.getSourceFile(pnpPaths.bazIndex));
         assert.deepEqual(ts.getPreEmitDiagnostics(program).map(d => ts.flattenDiagnosticMessageText(d.messageText, "\n")), []);
+    });
+});
+
+describe("unittests:: pnp:: workspaces with peer dependencies", () => {
+    useFakePnpApi(() => new FakePnpApi(pnpProjectRoot, getPnpMonorepoPackagesWithPeerDependencies()));
+
+    // Yarn gives packages with peer dependencies a virtual location for each package depending on them.
+    // Workspaces are still resolved to their real location, as they would be through node_modules symlinks.
+
+    function createPeerDependencyHost() {
+        return TestServerHost.createServerHost({ ...getPnpMonorepoFiles(), ...getPnpPeerDependencyFiles() }, { overrideCurrentDirectory: pnpPaths.app });
+    }
+
+    function assertNoVirtualWorkspacePaths(program: ts.Program) {
+        assert.deepEqual(program.getSourceFiles().map(f => f.fileName).filter(f => f.includes("__virtual__") && f !== pnpPeerDependencyPaths.pluginIndex), []);
+    }
+
+    it("resolves workspace dependencies to their real location", () => {
+        const host = createPeerDependencyHost();
+        assert.strictEqual(resolve(host, "lib")?.resolvedFileName, pnpPaths.libIndex);
+        assert.strictEqual(resolve(host, "lib/thing")?.resolvedFileName, pnpPaths.libThing);
+        assert.strictEqual(resolve(host, "lib/sub/deep")?.resolvedFileName, pnpPaths.libSubDeep);
+        assert.strictEqual(ts.resolvePackageNameToPackageJson("lib", pnpPaths.app, options, host, /*cache*/ undefined)?.packageDirectory, pnpPaths.lib);
+    });
+
+    it("resolves transitive workspace dependencies to their real location", () => {
+        assert.strictEqual(resolve(createPeerDependencyHost(), "ui", pnpPaths.libIndex)?.resolvedFileName, pnpPeerDependencyPaths.uiIndex);
+    });
+
+    it("resolves peer dependencies of workspaces from their real location", () => {
+        assert.strictEqual(resolve(createPeerDependencyHost(), "foo", pnpPeerDependencyPaths.uiIndex)?.resolvedFileName, pnpPaths.fooIndex);
+    });
+
+    it("keeps the virtual location of packages that aren't workspaces", () => {
+        assert.strictEqual(resolve(createPeerDependencyHost(), "plugin")?.resolvedFileName, pnpPeerDependencyPaths.pluginIndex);
+    });
+
+    it("only includes workspaces from their real location in programs", () => {
+        const host = createPeerDependencyHost();
+        host.writeFile(pnpPaths.appIndex, `import { libValue } from "lib";\nimport { uiValue } from "lib/ui";\nimport { pluginValue } from "plugin";\nexport const value = libValue + uiValue + pluginValue;\n`);
+        const program = ts.createProgram({
+            rootNames: [pnpPaths.appIndex],
+            options,
+            host: ts.createCompilerHostWorker(options, /*setParentNodes*/ undefined, host),
+        });
+        assert.isDefined(program.getSourceFile(pnpPeerDependencyPaths.uiIndex));
+        assert.isDefined(program.getSourceFile(pnpPeerDependencyPaths.pluginIndex));
+        assertNoVirtualWorkspacePaths(program);
+        assert.deepEqual(ts.getPreEmitDiagnostics(program).map(d => ts.flattenDiagnosticMessageText(d.messageText, "\n")), []);
+    });
+
+    it("applies project references to workspaces", () => {
+        const host = createPeerDependencyHost();
+        host.writeFile(`${pnpPaths.lib}/tsconfig.json`, JSON.stringify({ compilerOptions: { composite: true, outDir: "dist" } }));
+        host.writeFile(`${pnpPaths.lib}/dist/index.d.ts`, `export declare const libValue = 1;\n`);
+        const program = ts.createProgram({
+            rootNames: [pnpPaths.appIndex],
+            options,
+            projectReferences: [{ path: pnpPaths.lib }],
+            host: ts.createCompilerHostWorker(options, /*setParentNodes*/ undefined, host),
+        });
+        // As with node_modules, the source files of the referenced project are replaced by its output
+        assert.isDefined(program.getSourceFile(`${pnpPaths.lib}/dist/index.d.ts`));
+        assert.notInclude(program.getSourceFiles().map(f => f.fileName), pnpPaths.libIndex);
+        assertNoVirtualWorkspacePaths(program);
+    });
+
+    it("uses the package name in module specifiers and auto-imports", () => {
+        const host = createPeerDependencyHost();
+        const { lsHost, service } = createLanguageService(host, [pnpPaths.appIndex, pnpPaths.libThing]);
+        const program = service.getProgram()!;
+        const checker = program.getTypeChecker();
+        const specifiers = ts.moduleSpecifiers.getModuleSpecifiers(
+            checker.getMergedSymbol(program.getSourceFile(pnpPaths.libThing)!.symbol),
+            checker,
+            program.getCompilerOptions(),
+            program.getSourceFile(pnpPaths.appIndex)!,
+            ts.createModuleSpecifierResolutionHost(program, lsHost),
+            {},
+        );
+        assert.deepEqual(specifiers, ["lib/thing"]);
+        assert.isTrue(isImportablePathPnp(pnpPaths.appIndex, pnpPaths.libThing));
+        assert.isTrue(isImportablePathPnp(pnpPaths.libIndex, pnpPeerDependencyPaths.uiIndex));
+    });
+
+    it("completes subpaths of workspace dependencies from their real location", () => {
+        const host = createPeerDependencyHost();
+        const consumer = `${pnpPaths.app}/src/consumer.ts`;
+        const content = `import {} from "lib/";`;
+        host.writeFile(consumer, content);
+        const { service } = createLanguageService(host, [pnpPaths.appIndex, consumer]);
+        const completions = service.getCompletionsAtPosition(consumer, content.length - 2, /*options*/ undefined, ts.testFormatSettings);
+        assert.include(completions?.entries.map(e => e.name) ?? [], "sub");
     });
 });
 

@@ -3,6 +3,8 @@ import {
     FakePnpApi,
     getPnpMonorepoFiles,
     getPnpMonorepoPackages,
+    getPnpMonorepoPackagesWithPeerDependencies,
+    getPnpPeerDependencyFiles,
     pnpPaths,
     pnpProjectRoot,
     useFakePnpApi,
@@ -45,30 +47,25 @@ describe("unittests:: tsserver:: pnp::", () => {
         assert.deepEqual(getErrorCodes(), []);
     });
 
-    it("maps project references to the virtual paths of workspaces with peer dependencies", () => {
-        const libVirtualReference = "virtual:abc#workspace:packages/lib";
-        const libVirtualLocation = `${pnpProjectRoot}/.yarn/__virtual__/lib-virtual-abc/2/packages/lib`;
-        const packages = getPnpMonorepoPackages().map(pkg =>
-            pkg.name === "app"
-                ? { ...pkg, dependencies: { ...pkg.dependencies, lib: libVirtualReference } }
-                : pkg
-        );
-        const lib = packages.find(pkg => pkg.name === "lib")!;
-        packages.push({ ...lib, reference: libVirtualReference, location: libVirtualLocation });
-        api.setPackages(packages);
-
+    it("uses the real location of workspaces with peer dependencies for project references", () => {
+        api.setPackages(getPnpMonorepoPackagesWithPeerDependencies());
         const host = TestServerHost.createServerHost({
             ...getPnpMonorepoFiles(),
+            ...getPnpPeerDependencyFiles(),
             [`${pnpPaths.app}/tsconfig.json`]: JSON.stringify({
                 compilerOptions: { module: "esnext", moduleResolution: "bundler", noEmit: true },
                 references: [{ path: "../lib" }],
             }),
-            [`${pnpPaths.lib}/tsconfig.json`]: JSON.stringify({ compilerOptions: { composite: true } }),
+            [`${pnpPaths.lib}/tsconfig.json`]: JSON.stringify({ compilerOptions: { composite: true, outDir: "dist" } }),
         });
         const session = new TestSession(host);
         openFilesForSession([pnpPaths.appIndex], session);
 
-        assert.deepEqual(getProject(session, pnpPaths.appIndex).getProjectReferences()?.map(ref => ref.path), [libVirtualLocation]);
+        const project = getProject(session, pnpPaths.appIndex);
+        assert.deepEqual(project.getProjectReferences()?.map(ref => ref.path), [pnpPaths.lib]);
+        // The source of the referenced project is used in place of its (unbuilt) output
+        assert.isDefined(project.getCurrentProgram()?.getSourceFile(pnpPaths.libIndex));
+        assert.deepEqual(project.getCurrentProgram()?.getSemanticDiagnostics().map(d => d.code), []);
     });
 
     it("keeps project references that aren't part of the PnP project", () => {

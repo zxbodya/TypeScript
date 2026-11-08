@@ -130,7 +130,10 @@ import {
     TypeChecker,
     UserPreferences,
 } from "./_namespaces/ts.js";
-import { getPnpApi } from "./pnpapi.js";
+import {
+    getPnpApi,
+    getPnpWorkspaceReference,
+} from "./pnpapi.js";
 
 const stringToRegex = memoizeOne((pattern: string) => {
     try {
@@ -1216,7 +1219,8 @@ function tryGetModuleNameAsNodeModule({ path, isRedirect }: ModulePath, { getCan
 
         if (fromLocator && toLocator) {
             const fromInfo = pnpApi.getPackageInformation(fromLocator);
-            if (toLocator.reference === fromInfo.packageDependencies.get(toLocator.name)) {
+            const toReference = fromInfo.packageDependencies.get(toLocator.name);
+            if (typeof toReference === "string" && getPnpWorkspaceReference(toReference) === getPnpWorkspaceReference(toLocator.reference)) {
                 pnpPackageName = toLocator.name;
             }
             else {

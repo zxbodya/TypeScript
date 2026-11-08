@@ -2,7 +2,10 @@ import {
     getDirectoryPath,
     resolvePath,
 } from "./path.js";
-import { getPnpApi } from "./pnpapi.js";
+import {
+    getPnpApi,
+    getPnpWorkspaceReference,
+} from "./pnpapi.js";
 
 export function getPnpTypeRoots(currentDirectory: string): string[] {
     const pnpApi = getPnpApi(currentDirectory);
@@ -24,7 +27,7 @@ export function getPnpTypeRoots(currentDirectory: string): string[] {
     for (const [name, referencish] of Array.from<any>(packageDependencies.entries())) {
         // eslint-disable-next-line no-restricted-syntax
         if (name.startsWith(`@types/`) && referencish !== null) {
-            const dependencyLocator = pnpApi.getLocator(name, referencish);
+            const dependencyLocator = pnpApi.getLocator(name, typeof referencish === "string" ? getPnpWorkspaceReference(referencish) : referencish);
             const { packageLocation } = pnpApi.getPackageInformation(dependencyLocator);
 
             typeRoots.push(getDirectoryPath(packageLocation));
@@ -49,8 +52,8 @@ export function isImportablePathPnp(fromPath: string, toPath: string): boolean {
     const fromInfo = pnpApi.getPackageInformation(fromLocator);
     const toReference = fromInfo.packageDependencies.get(toLocator.name);
 
-    if (toReference) {
-        return toReference === toLocator.reference;
+    if (typeof toReference === "string") {
+        return getPnpWorkspaceReference(toReference) === getPnpWorkspaceReference(toLocator.reference);
     }
 
     // Aliased dependencies
