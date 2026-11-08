@@ -111,7 +111,10 @@ import {
     VersionRange,
 } from "./_namespaces/ts.js";
 import { getPnpTypeRoots } from "./pnp.js";
-import { getPnpApi } from "./pnpapi.js";
+import {
+    getPnpApi,
+    resolvePnpRequestToUnqualified,
+} from "./pnpapi.js";
 
 /** @internal */
 export function trace(host: ModuleResolutionHost, message: DiagnosticMessage, ...args: any[]): void {
@@ -808,8 +811,7 @@ export function resolvePackageNameToPackageJson(
     const pnpapi = getPnpApi(containingDirectory);
     if (pnpapi) {
         try {
-            // Builtins are never returned as `null`, since they aren't considered
-            const resolution = pnpapi.resolveToUnqualified(packageName, `${containingDirectory}/`, { considerBuiltins: false })!;
+            const resolution = resolvePnpRequestToUnqualified(pnpapi, packageName, `${containingDirectory}/`);
             const candidate = normalizeSlashes(resolution).replace(/\/$/, "");
             return getPackageJsonInfo(candidate, /*onlyRecordFailures*/ false, moduleResolutionState);
         }
@@ -3477,8 +3479,7 @@ function useCaseSensitiveFileNames(state: ModuleResolutionState) {
 
 function loadPnpPackageResolution(packageName: string, containingDirectory: string) {
     try {
-        // Builtins are never returned as `null`, since they aren't considered
-        const resolution = getPnpApi(containingDirectory)!.resolveToUnqualified(packageName, `${containingDirectory}/`, { considerBuiltins: false })!;
+        const resolution = resolvePnpRequestToUnqualified(getPnpApi(containingDirectory)!, packageName, `${containingDirectory}/`);
         return normalizeSlashes(resolution).replace(/\/$/, "");
     }
     catch {

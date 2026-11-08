@@ -71,3 +71,28 @@ export function getPnpApiPath(path: string): string | undefined {
     // eslint-disable-next-line no-restricted-syntax
     return getPnpApi(path)?.resolveRequest("pnpapi", /*issuer*/ null) ?? undefined;
 }
+
+/**
+ * Yarn gives workspaces with peer dependencies a separate virtual location (under `.yarn/__virtual__`)
+ * for each set of peer dependencies they get. Returns the reference of the workspace itself for those,
+ * since workspaces are always used from their real location in the monorepo, as they would be through
+ * `node_modules` symlinks.
+ */
+export function getPnpWorkspaceReference(reference: string): string {
+    const match = /^virtual:[^#]*#(workspace:.*)$/.exec(reference);
+    return match ? match[1] : reference;
+}
+
+/** Resolves `request` like `resolveToUnqualified`, mapping virtual workspace locations to their real location. */
+export function resolvePnpRequestToUnqualified(pnpApi: PnpApi, request: string, issuer: string): string {
+    // Builtins are never returned as `null`, since they aren't considered
+    const resolution = pnpApi.resolveToUnqualified(request, issuer, { considerBuiltins: false })!;
+    const locator = pnpApi.findPackageLocator(`${resolution}/`);
+    const reference = locator && getPnpWorkspaceReference(locator.reference);
+    if (!reference || reference === locator.reference) {
+        return resolution;
+    }
+    const virtualLocation = pnpApi.getPackageInformation(locator).packageLocation;
+    const realLocation = pnpApi.getPackageInformation({ name: locator.name, reference }).packageLocation;
+    return `${realLocation}${`${resolution}/`.slice(virtualLocation.length)}`.replace(/[\\/]$/, "");
+}
