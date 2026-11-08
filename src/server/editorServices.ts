@@ -4009,7 +4009,7 @@ export class ProjectService {
                 this.logger.info(`Host watch options changed to ${JSON.stringify(this.hostConfiguration.watchOptions)}, it will be take effect for next watches.`);
 
                 this.pnpWatcher?.close();
-                this.watchPnpFile();
+                this.pnpWatcher = this.watchPnpFile();
             }
         }
     }
