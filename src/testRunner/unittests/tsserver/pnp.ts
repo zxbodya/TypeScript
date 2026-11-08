@@ -130,9 +130,7 @@ describe("unittests:: tsserver:: pnp::", () => {
         setWatchFile(ts.server.protocol.WatchFileKind.UseFsEvents);
         assert.strictEqual(getPnpWatcherCount(), 1);
 
-        // Current behavior, likely a bug: the new watcher isn't stored in `pnpWatcher`,
-        // so later changes close the already closed initial watcher and watchers accumulate.
         setWatchFile(ts.server.protocol.WatchFileKind.PriorityPollingInterval);
-        assert.strictEqual(getPnpWatcherCount(), 2);
+        assert.strictEqual(getPnpWatcherCount(), 1);
     });
 });
