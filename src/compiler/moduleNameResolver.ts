@@ -807,7 +807,8 @@ export function resolvePackageNameToPackageJson(
     const pnpapi = getPnpApi(containingDirectory);
     if (pnpapi) {
         try {
-            const resolution = pnpapi.resolveToUnqualified(packageName, `${containingDirectory}/`, { considerBuiltins: false });
+            // Builtins are never returned as `null`, since they aren't considered
+            const resolution = pnpapi.resolveToUnqualified(packageName, `${containingDirectory}/`, { considerBuiltins: false })!;
             const candidate = normalizeSlashes(resolution).replace(/\/$/, "");
             return getPackageJsonInfo(candidate, /*onlyRecordFailures*/ false, moduleResolutionState);
         }
@@ -3477,7 +3478,8 @@ function useCaseSensitiveFileNames(state: ModuleResolutionState) {
 
 function loadPnpPackageResolution(packageName: string, containingDirectory: string) {
     try {
-        const resolution = getPnpApi(containingDirectory).resolveToUnqualified(packageName, `${containingDirectory}/`, { considerBuiltins: false });
+        // Builtins are never returned as `null`, since they aren't considered
+        const resolution = getPnpApi(containingDirectory)!.resolveToUnqualified(packageName, `${containingDirectory}/`, { considerBuiltins: false })!;
         return normalizeSlashes(resolution).replace(/\/$/, "");
     }
     catch {

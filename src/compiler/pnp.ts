@@ -35,7 +35,8 @@ export function getPnpTypeRoots(currentDirectory: string): string[] {
 }
 
 export function isImportablePathPnp(fromPath: string, toPath: string): boolean {
-    const pnpApi = getPnpApi(fromPath);
+    // Only called for paths of a PnP project
+    const pnpApi = getPnpApi(fromPath)!;
 
     const fromLocator = pnpApi.findPackageLocator(fromPath);
     const toLocator = pnpApi.findPackageLocator(toPath);
@@ -45,7 +46,7 @@ export function isImportablePathPnp(fromPath: string, toPath: string): boolean {
         return false;
     }
 
-    const fromInfo = pnpApi.getPackageInformation(fromLocator);
+    const fromInfo = pnpApi.getPackageInformation(fromLocator!);
     const toReference = fromInfo.packageDependencies.get(toLocator.name);
 
     if (toReference) {
